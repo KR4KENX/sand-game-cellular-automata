@@ -1,125 +1,164 @@
-#include <array>
-#include <iostream>
 #include <SFML/Graphics.hpp>
-#include <cstdlib> // Dla rand() i srand()
-#include <ctime>   // Dla time()
+#include <array>
+#include <cstdlib>
+#include <ctime>
+#include <iostream>
+
 using namespace std;
 
-const int screenWidth = 400;
-const int screenHeight = 320;
-enum ParticleType{
+const int gameMapSize = 200;
+const int cellSize = 4;
+const int windowSize = gameMapSize * cellSize;
+
+enum CellType {
     Air,
     Sand,
+    Water,
     Rock
 };
-struct Particle{
+
+struct Cell {
     sf::Color color;
-    ParticleType type;
+    CellType type;
+    int directionX;
+    int frictionRate;
+    int dispersionRate;
+    bool isFreeFalling;
 };
 
-// Sprawdza, czy współrzędne znajdują się w granicach mapy
-bool isInMapBounds(int x, int y) {
-    return (x >= 0 && x < screenWidth && y >= 0 && y < screenHeight);
+bool isInMapBounds(int mx, int my, array<int, 2> xy){
+    if (xy[0] >= 0 && xy[0] < mx && xy[1] >= 0 && xy[1] < my) return true;
+    return false;
 }
 
-// Określa ruch piasku w dół (jeśli możliwe)
-array<int, 2> sandMovement(array<array<Particle, screenHeight>, screenWidth>& gameMap, int particle_x, int particle_y) {
-    if (isInMapBounds(particle_x, particle_y + 1) && gameMap[particle_x][particle_y + 1].type == Air) {
-        return {particle_x, particle_y + 1}; // Piasek porusza się w dół
-    }
-    int random_number = (std::rand() % 2) * 2 - 1;
-    if (isInMapBounds(particle_x - random_number, particle_y + 1) && gameMap[particle_x - random_number][particle_y + 1].type == Air){
-            return {particle_x - random_number, particle_y + 1};
+void cellularAutomata(array<array<Cell, gameMapSize>, gameMapSize>& gameMap){
+    auto sandMove = [=, &gameMap](int sand_x, int sand_y, Cell& sand_obj) -> array<int, 2> {
+        if (isInMapBounds(gameMapSize, gameMapSize, {sand_x, sand_y+1})){
+            if(gameMap[sand_x][sand_y+1].type == Air) return {sand_x, sand_y+1};
+            if(gameMap[sand_x][sand_y+1].type == Sand) gameMap[sand_x][sand_y+1].frictionRate = sand_obj.frictionRate;
         }
-    if (isInMapBounds(particle_x + random_number, particle_y + 1) && gameMap[particle_x + random_number][particle_y + 1].type == Air){
-            return {particle_x + random_number, particle_y + 1};
+        if (sand_obj.isFreeFalling) sand_x += sand_obj.directionX * sand_obj.dispersionRate;
+        sand_obj.isFreeFalling = false;
+        sand_obj.frictionRate--;
+        if(isInMapBounds(gameMapSize, gameMapSize, {sand_x+(sand_obj.dispersionRate*sand_obj.directionX), sand_y+1}) && sand_obj.frictionRate > 0){
+            if (gameMap[sand_x+(sand_obj.dispersionRate*sand_obj.directionX)][sand_y+1].type == Air) return {sand_x+(sand_obj.dispersionRate*sand_obj.directionX), sand_y+1};
+            if (gameMap[sand_x+(sand_obj.dispersionRate*sand_obj.directionX)][sand_y+1].type == Sand) gameMap[sand_x+(sand_obj.dispersionRate*sand_obj.directionX)][sand_y+1].frictionRate = sand_obj.frictionRate;
         }
-    return {particle_x, particle_y}; // Piasek nie porusza się
-}
-
-void cellularAutomata(array<array<Particle, screenHeight>, screenWidth>& gameMap){
-    for (int x = 0; x < screenWidth; x++){
-        for (int y = screenHeight - 1; y >= 0; y--){
-            if (gameMap[x][y].type == Sand){
-                array<int, 2> sandMove = sandMovement(gameMap, x, y);
-                if (sandMove[0] != x || sandMove[1] != y) {
-                    // Zamień miejscami piasek i powietrze
-                    gameMap[sandMove[0]][sandMove[1]] = gameMap[x][y];
-                    gameMap[x][y].type = Air;
-                    gameMap[x][y].color = sf::Color::Black;
-                }
+        if(isInMapBounds(gameMapSize, gameMapSize, {sand_x+(sand_obj.dispersionRate*(-sand_obj.directionX)), sand_y+1}) && sand_obj.frictionRate > 0){
+            if (gameMap[sand_x+(sand_obj.dispersionRate*(-sand_obj.directionX))][sand_y+1].type == Air) return {sand_x+(sand_obj.dispersionRate*(-sand_obj.directionX)), sand_y+1};
+            if (gameMap[sand_x+(sand_obj.dispersionRate*(-sand_obj.directionX))][sand_y+1].type == Sand) gameMap[sand_x+(sand_obj.dispersionRate*(-sand_obj.directionX))][sand_y+1].frictionRate = sand_obj.frictionRate;
+        }
+        return {sand_x, sand_y};
+    };
+    for (int i = gameMapSize; i >= 0; i--) {
+        for (int j = gameMapSize; j >= 0 ; j--) {
+            if (gameMap[i][j].type == Sand){
+                array<int, 2> new_cords = sandMove(i, j, gameMap[i][j]);
+                auto temp = gameMap[new_cords[0]][new_cords[1]];
+                gameMap[new_cords[0]][new_cords[1]] = gameMap[i][j];
+                gameMap[i][j] = temp;
             }
         }
     }
 }
 
-void mapGenerator(array<array<Particle, screenHeight>, screenWidth>& gameMap){
-    //init clear map
-    for (int x = 0; x < screenWidth; ++x) {
-        for (int y = 0; y < screenHeight; ++y) {
-            gameMap[x][y].type = Air;
-            gameMap[x][y].color = sf::Color::Black; // czarny kolor dla powietrza
+void spawnCell(Cell& cell, CellType cellType) {
+    if (cellType == Sand) {
+        int red = 255;
+        int green = 192 + rand() % 64;
+        int blue = std::rand() % 128;
+        cell.color = sf::Color(red, green, blue);
+        cell.type = Sand;
+        cell.directionX = std::rand() % 2 ? 1 : -1;
+        cell.frictionRate = 1 + std::rand() % 8;
+        cell.dispersionRate = 1 + std::rand() % 4;
+        cell.isFreeFalling = true;
+    }
+    if (cellType == Water) {
+        int red = std::rand() % 70;
+        int green = std::rand() % 70;
+        int blue = 255;
+        cell.color = sf::Color(red, green, blue);
+        cell.type = Water;
+        cell.directionX = std::rand() % 2 ? 1 : -1;
+        cell.dispersionRate = 1 + rand()%5;
+    }
+}
+
+int main() {
+    sf::RenderWindow window(sf::VideoMode(windowSize, windowSize), "Game Map");
+    window.setFramerateLimit(60);
+    std::srand(static_cast<unsigned>(std::time(nullptr)));
+
+    array<array<Cell, gameMapSize>, gameMapSize> gameMap;
+
+    // Inicjalizacja mapy
+    for (int i = 0; i < gameMapSize; i++) {
+        for (int j = 0; j < gameMapSize; j++) {
+            gameMap[i][j].color = sf::Color::Black;
+            gameMap[i][j].type = Air;
+            gameMap[i][j].directionX = 0;
+            gameMap[i][j].dispersionRate = 0;
+            gameMap[i][j].isFreeFalling = false;
         }
     }
-    for (int x = 0; x < screenWidth; ++x){
-        gameMap[x][250].type = Rock;
-        gameMap[x][250].color = sf::Color::Cyan;
-    }
-}
 
-void onClickCreateSand(array<array<Particle, screenHeight>, screenWidth>& gameMap, sf::Vector2i clickPos){
-    gameMap[clickPos.x][clickPos.y].type = Sand;
-    gameMap[clickPos.x][clickPos.y].color = sf::Color::Yellow;
-}
+    // Zmieniamy tryb na sf::Quads i ustawiamy poprawną liczbę wierzchołków
+    sf::VertexArray pixels(sf::Quads, gameMapSize * gameMapSize * 4);
 
-int main(){
-    std::srand(static_cast<unsigned int>(std::time(nullptr)));
-    // Utwórz okno SFML
-    sf::RenderWindow window(sf::VideoMode(screenWidth, screenHeight), "Sand simulation");
-
-    window.setFramerateLimit(60);
-
-    array<array<Particle, screenHeight>, screenWidth> gameMap;
-
-    mapGenerator(gameMap);
-
-   // Główna pętla
-    while (window.isOpen())
-    {
-        // Obsługa zdarzeń
+    while (window.isOpen()) {
         sf::Event event;
-        while (window.pollEvent(event))
-        {
+        while (window.pollEvent(event)) {
             if (event.type == sf::Event::Closed)
                 window.close();
 
-            if (sf::Mouse::isButtonPressed(sf::Mouse::Left))
-            {
-                // Pobieramy pozycję kursora myszki w oknie
+            if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
                 sf::Vector2i mousePosition = sf::Mouse::getPosition(window);
+                int local_x = mousePosition.x / cellSize;
+                int local_y = mousePosition.y / cellSize;
 
-                // Wywołujemy funkcję, gdy przycisk jest trzymany
-                onClickCreateSand(gameMap, mousePosition);
+                if (local_x >= 0 && local_x < gameMapSize && local_y >= 0 && local_y < gameMapSize) {
+                    spawnCell(gameMap[local_x][local_y], Sand);
+                }
+            }
+            if (sf::Mouse::isButtonPressed(sf::Mouse::Right)) {
+                sf::Vector2i mousePosition = sf::Mouse::getPosition(window);
+                int local_x = mousePosition.x / cellSize;
+                int local_y = mousePosition.y / cellSize;
+
+                if (local_x >= 0 && local_x < gameMapSize && local_y >= 0 && local_y < gameMapSize) {
+                    spawnCell(gameMap[local_x][local_y], Water);
+                }
             }
         }
 
-        // Czyszczenie okna
         window.clear();
 
         cellularAutomata(gameMap);
 
-        // Renderowanie pikseli z tablicy
-        for (int x = 0; x < screenWidth; ++x) {
-            for (int y = 0; y < screenHeight; ++y) {
-                sf::RectangleShape pixel(sf::Vector2f(1, 1));
-                pixel.setPosition(static_cast<float>(x), static_cast<float>(y));
-                pixel.setFillColor(gameMap[x][y].color);
-                window.draw(pixel);
+        // Aktualizacja sf::VertexArray na podstawie gameMap
+        for (int i = 0; i < gameMapSize; i++) {
+            for (int j = 0; j < gameMapSize; j++) {
+                int index = (i + j * gameMapSize) * 4;
+
+                // Ustawienie pozycji wierzchołków dla każdego quada (kwadratu)
+                pixels[index].position = sf::Vector2f(i * cellSize, j * cellSize);
+                pixels[index + 1].position = sf::Vector2f((i + 1) * cellSize, j * cellSize);
+                pixels[index + 2].position = sf::Vector2f((i + 1) * cellSize, (j + 1) * cellSize);
+                pixels[index + 3].position = sf::Vector2f(i * cellSize, (j + 1) * cellSize);
+
+                // Ustawienie koloru wierzchołków na podstawie koloru komórki
+                sf::Color cellColor = gameMap[i][j].color;
+                pixels[index].color = cellColor;
+                pixels[index + 1].color = cellColor;
+                pixels[index + 2].color = cellColor;
+                pixels[index + 3].color = cellColor;
             }
         }
 
-        // Wyświetlenie zawartości okna
+        window.draw(pixels);
         window.display();
     }
+
     return 0;
 }
