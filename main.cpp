@@ -24,6 +24,7 @@ struct Cell {
     int frictionRate;
     int dispersionRate;
     bool isFreeFalling;
+    float inertalResistance;
 };
 
 bool isInMapBounds(int mx, int my, array<int, 2> xy){
@@ -31,57 +32,88 @@ bool isInMapBounds(int mx, int my, array<int, 2> xy){
     return false;
 }
 
-void cellularAutomata(array<array<Cell, gameMapSize>, gameMapSize>& gameMap){
+//int clamp()
+
+void cellularAutomata(array<array<Cell, gameMapSize>, gameMapSize>& gameMap) {
     auto sandMove = [=, &gameMap](int sand_x, int sand_y, Cell& sand_obj) -> array<int, 2> {
-        if (isInMapBounds(gameMapSize, gameMapSize, {sand_x, sand_y+1})){
-            if(gameMap[sand_x][sand_y+1].type == Air) return {sand_x, sand_y+1};
+        if (isInMapBounds(gameMapSize, gameMapSize, {sand_x, sand_y+1})) {
+            if(gameMap[sand_x][sand_y+1].type == Air || gameMap[sand_x][sand_y+1].type == Water) return {sand_x, sand_y+1};
             if(gameMap[sand_x][sand_y+1].type == Sand) gameMap[sand_x][sand_y+1].frictionRate = sand_obj.frictionRate;
         }
-        if (sand_obj.isFreeFalling) sand_x += sand_obj.directionX * sand_obj.dispersionRate;
+        float movement_prob = static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
+        if (sand_obj.isFreeFalling && sand_obj.frictionRate > 0) sand_x += sand_obj.directionX * sand_obj.dispersionRate;
         sand_obj.isFreeFalling = false;
         sand_obj.frictionRate--;
-        if(isInMapBounds(gameMapSize, gameMapSize, {sand_x+(sand_obj.dispersionRate*sand_obj.directionX), sand_y+1}) && sand_obj.frictionRate > 0){
-            if (gameMap[sand_x+(sand_obj.dispersionRate*sand_obj.directionX)][sand_y+1].type == Air) return {sand_x+(sand_obj.dispersionRate*sand_obj.directionX), sand_y+1};
-            if (gameMap[sand_x+(sand_obj.dispersionRate*sand_obj.directionX)][sand_y+1].type == Sand) gameMap[sand_x+(sand_obj.dispersionRate*sand_obj.directionX)][sand_y+1].frictionRate = sand_obj.frictionRate;
+        if (isInMapBounds(gameMapSize, gameMapSize, {sand_x + sand_obj.directionX, sand_y+1}) && sand_obj.frictionRate > 0) {
+            if (gameMap[sand_x + sand_obj.directionX][sand_y+1].type == Air || gameMap[sand_x + sand_obj.directionX][sand_y+1].type == Water) return {sand_x + sand_obj.directionX, sand_y+1};
+            if (gameMap[sand_x + sand_obj.directionX][sand_y+1].type == Sand && gameMap[sand_x + sand_obj.directionX][sand_y+1].inertalResistance > movement_prob) {
+                gameMap[sand_x + sand_obj.directionX][sand_y+1].frictionRate = 5;
+            }
         }
-        if(isInMapBounds(gameMapSize, gameMapSize, {sand_x+(sand_obj.dispersionRate*(-sand_obj.directionX)), sand_y+1}) && sand_obj.frictionRate > 0){
-            if (gameMap[sand_x+(sand_obj.dispersionRate*(-sand_obj.directionX))][sand_y+1].type == Air) return {sand_x+(sand_obj.dispersionRate*(-sand_obj.directionX)), sand_y+1};
-            if (gameMap[sand_x+(sand_obj.dispersionRate*(-sand_obj.directionX))][sand_y+1].type == Sand) gameMap[sand_x+(sand_obj.dispersionRate*(-sand_obj.directionX))][sand_y+1].frictionRate = sand_obj.frictionRate;
+        if (isInMapBounds(gameMapSize, gameMapSize, {sand_x - sand_obj.directionX, sand_y+1}) && sand_obj.frictionRate > 0) {
+            if (gameMap[sand_x - sand_obj.directionX][sand_y+1].type == Air || gameMap[sand_x - sand_obj.directionX][sand_y+1].type == Water) return {sand_x - sand_obj.directionX, sand_y+1};
+            if (gameMap[sand_x - sand_obj.directionX][sand_y+1].type == Sand && gameMap[sand_x - sand_obj.directionX][sand_y+1].inertalResistance > movement_prob) {
+                gameMap[sand_x - sand_obj.directionX][sand_y+1].frictionRate = 5;
+            }
         }
         return {sand_x, sand_y};
     };
-    for (int i = gameMapSize; i >= 0; i--) {
-        for (int j = gameMapSize; j >= 0 ; j--) {
-            if (gameMap[i][j].type == Sand){
-                array<int, 2> new_cords = sandMove(i, j, gameMap[i][j]);
-                auto temp = gameMap[new_cords[0]][new_cords[1]];
-                gameMap[new_cords[0]][new_cords[1]] = gameMap[i][j];
-                gameMap[i][j] = temp;
+
+    auto waterMove = [=, &gameMap](int water_x, int water_y, Cell& water_obj) -> array<int, 2> {
+        if (isInMapBounds(gameMapSize, gameMapSize, {water_x, water_y+1}) && gameMap[water_x][water_y+1].type == Air) {
+            return {water_x, water_y+1};
+        }
+        if (isInMapBounds(gameMapSize, gameMapSize, {water_x + water_obj.directionX, water_y}) && gameMap[water_x + water_obj.directionX][water_y].type == Air) {
+            return {water_x + water_obj.directionX, water_y};
+        }
+        if (isInMapBounds(gameMapSize, gameMapSize, {water_x - water_obj.directionX, water_y}) && gameMap[water_x - water_obj.directionX][water_y].type == Air) {
+            return {water_x - water_obj.directionX, water_y};
+        }
+        return {water_x, water_y};
+    };
+    array<array<Cell, gameMapSize>, gameMapSize> nextGameMap = gameMap;
+    for (int i = gameMapSize - 1; i >= 0; i--) {
+        for (int j = gameMapSize - 1; j >= 0; j--) {
+            if (nextGameMap[i][j].type == Sand) {
+                array<int, 2> new_cords = sandMove(i, j, nextGameMap[i][j]);
+                if (new_cords != array<int, 2>{i, j}) {
+                    std::swap(nextGameMap[new_cords[0]][new_cords[1]], nextGameMap[i][j]);
+                }
+            }
+            if (nextGameMap[i][j].type == Water) {
+                array<int, 2> new_cords = waterMove(i, j, nextGameMap[i][j]);
+                if (new_cords != array<int, 2>{i, j}) {
+                    std::swap(nextGameMap[new_cords[0]][new_cords[1]], nextGameMap[i][j]);
+                }
             }
         }
     }
+    gameMap = nextGameMap;
 }
+
 
 void spawnCell(Cell& cell, CellType cellType) {
     if (cellType == Sand) {
         int red = 255;
         int green = 192 + rand() % 64;
-        int blue = std::rand() % 128;
+        int blue = std::rand() % 32;
         cell.color = sf::Color(red, green, blue);
         cell.type = Sand;
         cell.directionX = std::rand() % 2 ? 1 : -1;
-        cell.frictionRate = 1 + std::rand() % 8;
-        cell.dispersionRate = 1 + std::rand() % 4;
+        cell.frictionRate = 1 + std::rand() % 4;
+        cell.dispersionRate = 1 + std::rand() % 7;
         cell.isFreeFalling = true;
+        cell.inertalResistance = (rand() % 5)/10;
     }
     if (cellType == Water) {
-        int red = std::rand() % 70;
-        int green = std::rand() % 70;
+        int red = std::rand() % 32;
+        int green = std::rand() % 32;
         int blue = 255;
         cell.color = sf::Color(red, green, blue);
         cell.type = Water;
         cell.directionX = std::rand() % 2 ? 1 : -1;
         cell.dispersionRate = 1 + rand()%5;
+        cell.inertalResistance = 1.0f;
     }
 }
 
